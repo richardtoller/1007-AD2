@@ -26,7 +26,7 @@ import tkinter as tk
 import logging
 
 
-def FreqResponseTest(console, freqs, gains):
+def FreqResponseTest(console, freqs, gains, phases):
     if sys.platform.startswith("win"):
         dwf = cdll.dwf
     elif sys.platform.startswith("darwin"):
@@ -50,7 +50,8 @@ def FreqResponseTest(console, freqs, gains):
     hdwf = c_int()
     sts = c_byte()
     sample_buffer_size = 8000
-    rgdSamples = (c_double * sample_buffer_size)()
+    uutSamples = (c_double * sample_buffer_size)() # samples from uut output
+    siggenSamples = (c_double * sample_buffer_size)() # samples from siggen (uut input)
     amplitude_v = 0.2  # peak, not pk-pk
     offset_v = 0.0
     max_sample_freq = 100000000
@@ -142,13 +143,14 @@ def FreqResponseTest(console, freqs, gains):
         if timeout_count > 100:
             break
 
-        dwf.FDwfAnalogInStatusData(hdwf, 0, rgdSamples, sample_buffer_size)  # get channel 1 data
-        # dwf.FDwfAnalogInStatusData(hdwf, 1, rgdSamples, 4000) # get channel 2 data
+        dwf.FDwfAnalogInStatusData(hdwf, 0, uutSamples, sample_buffer_size)  # get channel 1 data
+        dwf.FDwfAnalogInStatusData(hdwf, 1, siggenSamples, sample_buffer_size) # get channel 2 data
 
-        dc = sum(rgdSamples) / len(rgdSamples)
+        # calculate gain, etc, on uutSamples
+        dc = sum(uutSamples) / len(uutSamples)
         print("DC: " + str(dc) + "V")
-        max_v = max(rgdSamples)
-        min_v = min(rgdSamples)
+        max_v = max(uutSamples)
+        min_v = min(uutSamples)
         pk_pk_v = max_v - min_v
         pk_v = pk_pk_v / 2.0
         dc_v = max_v + min_v
@@ -164,9 +166,58 @@ def FreqResponseTest(console, freqs, gains):
 
         gains.append(gain_db)
 
+        # calculate phase shift
+        # find max index in uutSamples
+        uut_max_index = findPeak(uutSamples)
+        phases.append(uutSamples[uut_max_index])
+        print("*** MAX = ", str(uutSamples[uut_max_index]))
+
     dwf.FDwfAnalogOutReset(hdwf, c_int(0))
     dwf.FDwfDeviceCloseAll()
 
     print(" done")
     console.log(logging.DEBUG, "Frequency response complete")
     return
+
+def findPeak(buffer):
+    # step through buffer and return the index of the first peak after the first rising-edge zero-cross
+
+    max = 0
+    zero_cross_index = 0
+    buf_index = 0
+    max_index = 0
+    last_sample = 0
+    # find first rising-edge zero cross
+    # ... but first find 5 consecutive samples below 0, to act as a kind of filter
+    start_index = 0
+    window = [0.0, 0.0, 0.0, 0.0, 0.0]
+    window_index = 0
+    for v in buffer:
+        # shift sample into window buffer
+        for p in range(len(window)-1):
+            window[p] = window[p+1]
+        window[4] = v
+        if (window[0] < 0.0) and (window[1] < 0.0) and (window[2] < 0.0) and (window[3] < 0.0) and (window[4] < 0.0):
+            break
+        else:
+            start_index = start_index + 1
+
+    buf_index = 0
+    for i in range(start_index, len(buffer)):
+        if last_sample < 0.0 and buffer[i] > 0.0:
+            zero_cross_index = buf_index
+            #print("last sample = " + str(last_sample) + ", this sample = " + str(buffer[i]))
+            break
+        last_sample = buffer[i]
+        buf_index = buf_index + 1
+
+    print ("Zero cross at " + str(zero_cross_index))
+
+    # now find maximum value in a quarter-of-the-buffer-size samplers after zero cross
+    # this will be the peak that we're interested in
+    for n in range (zero_cross_index, buf_index + int(len(buffer)/4)):
+        if buffer[n] > max:
+            max = buffer[n]
+            max_index = n
+
+    return max_index

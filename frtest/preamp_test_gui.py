@@ -64,8 +64,9 @@ def RunFRTest(results_path, serial_number):
 
     console.log(logging.DEBUG, "FR test started for " + serial_number)
     gains = list()
+    phases = list()
     starttime = datetime.datetime.now()
-    FreqResponseTest(console, freqs, gains)
+    FreqResponseTest(console, freqs, gains, phases)
 
     # create folder for output
     results_folder_name = CreateResultsFolder(results_path, serial_number) + "/"
@@ -74,7 +75,8 @@ def RunFRTest(results_path, serial_number):
     logging.getLogger('matplotlib.font_manager').disabled = True
 
     fig, ax = plt.subplots()
-    ax.plot(freqs, gains, color='#1b598f')
+    #ax.plot(freqs, gains, color='#1b598f')
+    ax.plot(freqs, phases, color='#ab433a')
     ax.set_xscale('log')
     ax.set(xlabel='f (Hz)', ylabel='gain (dB)', title=serial_number + ' frequency response')
     # Customize the major grid
